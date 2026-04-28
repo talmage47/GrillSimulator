@@ -18,7 +18,7 @@ def run():
     sim.reset()
     pid.reset()
 
-    times, temps, auger_rates, fire_strengths = [], [], [], []
+    times, temps, fan_speeds, auger_rates = [], [], [], []
     lid_events = []
 
     for step in range(EPISODE_STEPS):
@@ -31,18 +31,18 @@ def run():
             sim.close_lid()
             lid_events.append(("close", t))
 
-        auger = pid.step(sim.grill_temperature, TARGET_TEMP)
-        sim.step(auger)
+        drive = pid.step(sim.grill_temperature, TARGET_TEMP)
+        sim.step(drive, drive)  # PID drives fan and auger equally
 
         times.append(t / 60)  # convert to minutes
         temps.append(sim.grill_temperature)
+        fan_speeds.append(sim.fan_speed)
         auger_rates.append(sim.auger_feed_rate)
-        fire_strengths.append(sim.fire_strength)
 
-    _plot(times, temps, auger_rates, fire_strengths, lid_events)
+    _plot(times, temps, fan_speeds, auger_rates, lid_events)
 
 
-def _plot(times, temps, auger_rates, fire_strengths, lid_events):
+def _plot(times, temps, fan_speeds, auger_rates, lid_events):
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
     fig.suptitle("PID Controller — Pellet Grill Simulation", fontsize=13)
 
@@ -54,9 +54,9 @@ def _plot(times, temps, auger_rates, fire_strengths, lid_events):
     ax1.legend(loc="lower right")
     ax1.grid(True, alpha=0.3)
 
-    # -- Auger / fire plot --
-    ax2.plot(times, auger_rates, color="steelblue", label="Auger feed rate")
-    ax2.plot(times, fire_strengths, color="orange", linestyle="--", label="Fire strength")
+    # -- Fan / auger plot --
+    ax2.plot(times, fan_speeds, color="steelblue", label="Fan speed")
+    ax2.plot(times, auger_rates, color="orange", linestyle="--", label="Auger feed rate")
     ax2.set_ylabel("Rate (0–1)")
     ax2.set_xlabel("Time (minutes)")
     ax2.set_ylim(-0.05, 1.05)

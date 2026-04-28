@@ -6,7 +6,7 @@ from stable_baselines3.common.callbacks import EvalCallback
 from grill_env import GrillEnv
 
 
-TIMESTEPS = 500_000
+TIMESTEPS = 1_000_000
 MODEL_PATH = "models/grill_sac"
 LOG_PATH = "logs/"
 
@@ -21,6 +21,7 @@ def main():
     model = SAC(
         policy="MlpPolicy",
         env=train_env,
+        learning_rate=0.0001,
         verbose=1,
         tensorboard_log=LOG_PATH,
     )

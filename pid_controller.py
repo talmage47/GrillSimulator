@@ -1,6 +1,10 @@
 class PIDController:
     """
-    PID controller that outputs auger feed rate given a temperature error.
+    PID controller that outputs a single drive signal given a temperature error.
+
+    The signal is clamped to [0, 1] and is intended to be applied to both
+    fan speed and auger feed rate together (coupled operation). The NN
+    controller can learn to vary them independently for better performance.
 
     Output is clamped to [0, 1] with integral anti-windup to prevent
     the I term from accumulating while the output is saturated.
@@ -23,14 +27,14 @@ class PIDController:
 
     def step(self, current_temp: float, target_temp: float) -> float:
         """
-        Compute auger feed rate for this timestep.
+        Compute drive signal for this timestep.
 
         Args:
             current_temp: Current grill temperature (°F).
             target_temp:  Desired grill temperature (°F).
 
         Returns:
-            auger_feed_rate in [0, 1].
+            drive signal in [0, 1] — apply to both fan speed and auger feed rate.
         """
         error = target_temp - current_temp
 

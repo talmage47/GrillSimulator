@@ -24,7 +24,7 @@ def run_gains(kp, ki, kd):
     sim.reset()
     pid.reset()
 
-    times, temps, augers = [], [], []
+    times, temps, fan_speeds = [], [], []
 
     for step in range(EPISODE_STEPS):
         if step == LID_OPEN_AT:
@@ -32,14 +32,14 @@ def run_gains(kp, ki, kd):
         elif step == LID_CLOSE_AT:
             sim.close_lid()
 
-        auger = pid.step(sim.grill_temperature, TARGET_TEMP)
-        sim.step(auger)
+        drive = pid.step(sim.grill_temperature, TARGET_TEMP)
+        sim.step(drive, drive)  # PID drives fan and auger equally
 
         times.append(step / 60)
         temps.append(sim.grill_temperature)
-        augers.append(sim.auger_feed_rate)
+        fan_speeds.append(sim.fan_speed)
 
-    return times, temps, augers
+    return times, temps, fan_speeds
 
 
 def main():
@@ -47,12 +47,12 @@ def main():
     fig.suptitle("PID Gain Comparison", fontsize=13)
 
     for ax, gains in zip(axes, GAIN_SETS):
-        times, temps, augers = run_gains(gains["kp"], gains["ki"], gains["kd"])
+        times, temps, fan_speeds = run_gains(gains["kp"], gains["ki"], gains["kd"])
 
         ax2 = ax.twinx()
-        ax2.plot(times, augers, color="steelblue", alpha=0.4, linewidth=1, label="auger")
+        ax2.plot(times, fan_speeds, color="steelblue", alpha=0.4, linewidth=1, label="fan")
         ax2.set_ylim(-0.05, 1.05)
-        ax2.set_ylabel("Auger", color="steelblue", fontsize=8)
+        ax2.set_ylabel("Fan Speed", color="steelblue", fontsize=8)
         ax2.tick_params(axis="y", labelcolor="steelblue", labelsize=7)
 
         ax.plot(times, temps, color="tomato", linewidth=1.5)

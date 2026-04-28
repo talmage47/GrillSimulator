@@ -10,8 +10,9 @@ class GrillEnv(gym.Env):
     Gymnasium environment wrapping PelletGrillSimulator.
 
     Observation: [grill_temperature, delta_temperature, temperature_acceleration,
-                  auger_feed_rate, target_temperature, error, elapsed_fraction]
-    Action:      auger_feed_rate in [0, 1]
+                  fan_speed, auger_feed_rate, target_temperature, error, elapsed_fraction]
+    Action:      [fan_speed, auger_signal] — fan_speed is continuous [0, 1];
+                 auger_signal is thresholded at 0.5 to on (1.0) or off (0.0).
 
     The agent does not observe ambient temperature or lid state — it must
     infer disturbances from temperature response alone.
@@ -41,14 +42,14 @@ class GrillEnv(gym.Env):
         self.timestep = timestep
 
         self.observation_space = spaces.Box(
-            low=np.array( [self.MIN_TEMP, -600.0, -600.0, 0.0, self.TARGET_TEMP_MIN, -600.0, 0.0], dtype=np.float32),
-            high=np.array([self.MAX_TEMP,  600.0,  600.0, 1.0, self.TARGET_TEMP_MAX,  600.0, 1.0], dtype=np.float32),
+            low=np.array( [self.MIN_TEMP, -600.0, -600.0, 0.0, 0.0, self.TARGET_TEMP_MIN, -600.0, 0.0], dtype=np.float32),
+            high=np.array([self.MAX_TEMP,  600.0,  600.0, 1.0, 1.0, self.TARGET_TEMP_MAX,  600.0, 1.0], dtype=np.float32),
         )
 
         self.action_space = spaces.Box(
             low=np.float32(0.0),
             high=np.float32(1.0),
-            shape=(1,),
+            shape=(2,),
         )
 
         self.simulator = PelletGrillSimulator(timestep=timestep)
@@ -78,12 +79,13 @@ class GrillEnv(gym.Env):
         return self._get_obs(), {}
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
-        auger_feed_rate = float(action[0])
+        fan_speed = float(action[0])
+        auger_feed_rate = float(action[1])
 
         self._maybe_toggle_lid()
 
         prev_temp = self.simulator.grill_temperature
-        grill_temp, auger_rate = self.simulator.step(auger_feed_rate)
+        grill_temp, _, _ = self.simulator.step(fan_speed, auger_feed_rate)
         self._steps += 1
 
         delta_temp = grill_temp - prev_temp
@@ -100,18 +102,21 @@ class GrillEnv(gym.Env):
             "target_temperature": self.target_temperature,
             "ambient_temperature": self.simulator.ambient_temperature,
             "lid_open": self.simulator.lid_open,
-            "fire_strength": self.simulator.fire_strength,
+            "airflow": self.simulator.airflow,
+            "fuel_supply": self.simulator.fuel_supply,
         }
 
         return obs, reward, terminated, truncated, info
 
     def render(self):
-        temp, delta, accel, auger, target, error = self._get_obs()
+        obs = self._get_obs()
+        temp, delta, accel, fan, auger, target, error, elapsed = obs
         print(
             f"step={self._steps:4d} | "
             f"temp={temp:6.1f}°F | "
             f"target={target:6.1f}°F | "
             f"error={error:+6.1f}°F | "
+            f"fan={fan:.2f} | "
             f"auger={auger:.2f} | "
             f"lid={'open' if self.simulator.lid_open else 'closed'}"
         )
@@ -126,7 +131,8 @@ class GrillEnv(gym.Env):
         elapsed_fraction = self._steps / self.EPISODE_STEPS
         return np.array(
             [temp, self._delta_temperature, self._temperature_acceleration,
-             self.simulator.auger_feed_rate, self.target_temperature, error, elapsed_fraction],
+             self.simulator.fan_speed, self.simulator.auger_feed_rate,
+             self.target_temperature, error, elapsed_fraction],
             dtype=np.float32,
         )
 

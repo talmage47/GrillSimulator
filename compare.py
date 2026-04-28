@@ -69,35 +69,37 @@ PREHEAT_MAX_STEPS = 7200    # 2 hour cap on preheat
 
 def _preheat_pid(sim, pid, target):
     """Run PID until within PREHEAT_THRESHOLD of target. Returns preheat temps for plotting."""
-    temps, augers = [], []
+    temps, fan_speeds, auger_rates = [], [], []
     for _ in range(PREHEAT_MAX_STEPS):
-        auger = pid.step(sim.grill_temperature, target)
-        sim.step(auger)
+        drive = pid.step(sim.grill_temperature, target)
+        sim.step(drive, drive)
         temps.append(sim.grill_temperature)
-        augers.append(sim.auger_feed_rate)
+        fan_speeds.append(sim.fan_speed)
+        auger_rates.append(sim.auger_feed_rate)
         if sim.grill_temperature >= target - PREHEAT_THRESHOLD:
             break
-    return temps, augers
+    return temps, fan_speeds, auger_rates
 
 
 def _preheat_nn(env, model, target):
     """Run NN until within PREHEAT_THRESHOLD of target. Returns preheat temps for plotting."""
-    temps, augers = [], []
+    temps, fan_speeds, auger_rates = [], [], []
     obs = env._get_obs()  # elapsed_fraction=0 during preheat
     for _ in range(PREHEAT_MAX_STEPS):
         action, _ = model.predict(obs, deterministic=True)
         prev_temp = env.simulator.grill_temperature
-        env.simulator.step(float(action[0]))
+        env.simulator.step(float(action[0]), float(action[1]))
         delta_temp = env.simulator.grill_temperature - prev_temp
         env._temperature_acceleration = delta_temp - env._delta_temperature
         env._delta_temperature = delta_temp
         # keep _steps=0 so elapsed_fraction stays 0 throughout preheat
         obs = env._get_obs()
         temps.append(env.simulator.grill_temperature)
-        augers.append(env.simulator.auger_feed_rate)
+        fan_speeds.append(env.simulator.fan_speed)
+        auger_rates.append(env.simulator.auger_feed_rate)
         if env.simulator.grill_temperature >= target - PREHEAT_THRESHOLD:
             break
-    return temps, augers
+    return temps, fan_speeds, auger_rates
 
 
 def run_pid(scenario) -> dict:
@@ -106,9 +108,9 @@ def run_pid(scenario) -> dict:
     sim.reset()
     pid.reset()
 
-    preheat_temps, preheat_augers = _preheat_pid(sim, pid, scenario["target"])
+    preheat_temps, preheat_fan_speeds, preheat_auger_rates = _preheat_pid(sim, pid, scenario["target"])
 
-    times, temps, augers = [], [], []
+    times, temps, fan_speeds, auger_rates = [], [], [], []
     opens  = {o for o, _ in scenario["lid_events"]}
     closes = {c for _, c in scenario["lid_events"]}
 
@@ -118,16 +120,18 @@ def run_pid(scenario) -> dict:
         if step in closes:
             sim.close_lid()
 
-        auger = pid.step(sim.grill_temperature, scenario["target"])
-        sim.step(auger)
+        drive = pid.step(sim.grill_temperature, scenario["target"])
+        sim.step(drive, drive)
 
         times.append(step / 60)
         temps.append(sim.grill_temperature)
-        augers.append(sim.auger_feed_rate)
+        fan_speeds.append(sim.fan_speed)
+        auger_rates.append(sim.auger_feed_rate)
 
     preheat_minutes = len(preheat_temps) / 60
-    return {"times": times, "temps": temps, "augers": augers,
-            "preheat_temps": preheat_temps, "preheat_minutes": preheat_minutes}
+    return {"times": times, "temps": temps, "fan_speeds": fan_speeds, "auger_rates": auger_rates,
+            "preheat_temps": preheat_temps, "preheat_fan_speeds": preheat_fan_speeds,
+            "preheat_auger_rates": preheat_auger_rates, "preheat_minutes": preheat_minutes}
 
 
 def run_nn(scenario, model) -> dict:
@@ -138,10 +142,10 @@ def run_nn(scenario, model) -> dict:
     env._delta_temperature = 0.0
     env._temperature_acceleration = 0.0
 
-    preheat_temps, preheat_augers = _preheat_nn(env, model, scenario["target"])
+    preheat_temps, preheat_fan_speeds, preheat_auger_rates = _preheat_nn(env, model, scenario["target"])
 
     obs = env._get_obs()
-    times, temps, augers = [], [], []
+    times, temps, fan_speeds, auger_rates = [], [], [], []
     opens  = {o for o, _ in scenario["lid_events"]}
     closes = {c for _, c in scenario["lid_events"]}
 
@@ -153,7 +157,7 @@ def run_nn(scenario, model) -> dict:
 
         action, _ = model.predict(obs, deterministic=True)
         prev_temp = env.simulator.grill_temperature
-        env.simulator.step(float(action[0]))
+        env.simulator.step(float(action[0]), float(action[1]))
         delta_temp = env.simulator.grill_temperature - prev_temp
         env._temperature_acceleration = delta_temp - env._delta_temperature
         env._delta_temperature = delta_temp
@@ -161,11 +165,13 @@ def run_nn(scenario, model) -> dict:
 
         times.append(step / 60)
         temps.append(env.simulator.grill_temperature)
-        augers.append(env.simulator.auger_feed_rate)
+        fan_speeds.append(env.simulator.fan_speed)
+        auger_rates.append(env.simulator.auger_feed_rate)
 
     preheat_minutes = len(preheat_temps) / 60
-    return {"times": times, "temps": temps, "augers": augers,
-            "preheat_temps": preheat_temps, "preheat_minutes": preheat_minutes}
+    return {"times": times, "temps": temps, "fan_speeds": fan_speeds, "auger_rates": auger_rates,
+            "preheat_temps": preheat_temps, "preheat_fan_speeds": preheat_fan_speeds,
+            "preheat_auger_rates": preheat_auger_rates, "preheat_minutes": preheat_minutes}
 
 
 def mae(temps, target):
@@ -180,9 +186,8 @@ def _slugify(text):
     return text[:60]
 
 
-def plot(scenarios, pid_results, nn_results):
+def plot(scenarios, pid_results, nn_results, timestamp):
     os.makedirs(GRAPHS_DIR, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     plt.style.use("dark_background")
 
@@ -203,13 +208,13 @@ def plot(scenarios, pid_results, nn_results):
         pid_preheat_times = [-pid_preheat_min + i/60 for i in range(len(pid_res["preheat_temps"]))]
         nn_preheat_times  = [-nn_preheat_min  + i/60 for i in range(len(nn_res["preheat_temps"]))]
 
-        ax.plot(pid_preheat_times, pid_res["preheat_temps"], color="#4fc3f7", linewidth=1.5, alpha=0.35)
         ax.plot(nn_preheat_times,  nn_res["preheat_temps"],  color="#ff7043", linewidth=1.5, alpha=0.35)
+        ax.plot(pid_preheat_times, pid_res["preheat_temps"], color="#4fc3f7", linewidth=1.5, alpha=0.35)
         ax.axvspan(-preheat_end, 0, color="#2a2a4a", alpha=0.8, label="Preheat")
         ax.axvline(0, color="#aaaaaa", linewidth=0.8, linestyle="--")
 
-        ax.plot(pid_res["times"], pid_res["temps"], color="#4fc3f7", linewidth=2.0, label="PID")
         ax.plot(nn_res["times"],  nn_res["temps"],  color="#ff7043", linewidth=2.0, label="NN (SAC)")
+        ax.plot(pid_res["times"], pid_res["temps"], color="#4fc3f7", linewidth=2.0, label="PID")
         ax.axhline(target, color="#b0b0b0", linestyle="--", linewidth=1, label=f"Target ({target}°F)")
 
         if scenario["lid_events"]:
@@ -249,6 +254,113 @@ def plot(scenarios, pid_results, nn_results):
         plt.close(fig)
 
 
+def plot_controls(scenario, pid_res, nn_res, timestamp):
+    """
+    3-panel control breakdown for a single scenario:
+    temperature, fan speed, and auger feed rate — PID vs NN side by side.
+    """
+    os.makedirs(GRAPHS_DIR, exist_ok=True)
+
+    BG_OUTER  = "#1a1a2e"
+    BG_INNER  = "#16213e"
+    PREHEAT_C = "#2a2a4a"
+    PID_COLOR = "#4fc3f7"
+    NN_COLOR  = "#ff7043"
+    LID_COLOR = "#ce93d8"
+    TARGET_C  = "#b0b0b0"
+
+    SLIDE_W, SLIDE_H = 13.33, 9.5
+
+    fig, (ax_temp, ax_fan, ax_auger) = plt.subplots(
+        3, 1, figsize=(SLIDE_W, SLIDE_H),
+        gridspec_kw={"height_ratios": [3, 1, 1]},
+        sharex=True,
+    )
+    fig.patch.set_facecolor(BG_OUTER)
+    for ax in (ax_temp, ax_fan, ax_auger):
+        ax.set_facecolor(BG_INNER)
+
+    target = scenario["target"]
+    pid_preheat_min = pid_res["preheat_minutes"]
+    nn_preheat_min  = nn_res["preheat_minutes"]
+    preheat_end = max(pid_preheat_min, nn_preheat_min)
+
+    pid_pre_t = [-pid_preheat_min + i/60 for i in range(len(pid_res["preheat_temps"]))]
+    nn_pre_t  = [-nn_preheat_min  + i/60 for i in range(len(nn_res["preheat_temps"]))]
+
+    # --- Temperature panel ---
+    for ax in (ax_temp, ax_fan, ax_auger):
+        ax.axvspan(-preheat_end, 0, color=PREHEAT_C, alpha=0.8)
+        ax.axvline(0, color="#aaaaaa", linewidth=0.8, linestyle="--")
+
+    ax_temp.plot(nn_pre_t,  nn_res["preheat_temps"],  color=NN_COLOR,  linewidth=1.5, alpha=0.35)
+    ax_temp.plot(pid_pre_t, pid_res["preheat_temps"], color=PID_COLOR, linewidth=1.5, alpha=0.35)
+    ax_temp.plot(nn_res["times"],  nn_res["temps"],  color=NN_COLOR,  linewidth=2.0, label="NN (SAC)")
+    ax_temp.plot(pid_res["times"], pid_res["temps"], color=PID_COLOR, linewidth=2.0, label="PID")
+    ax_temp.axhline(target, color=TARGET_C, linestyle="--", linewidth=1, label=f"Target ({target:.0f}°F)")
+    ax_temp.set_ylabel("Temperature (°F)", color="#cccccc", fontsize=11)
+
+    pid_mae = mae(pid_res["temps"], target)
+    nn_mae  = mae(nn_res["temps"],  target)
+    ax_temp.text(0.99, 0.93, f"MAE — PID: {pid_mae:.1f}°F   NN: {nn_mae:.1f}°F",
+                 transform=ax_temp.transAxes, ha="right", fontsize=11, color="#dddddd",
+                 bbox=dict(boxstyle="round,pad=0.4", fc=BG_OUTER, ec="#444466", alpha=0.9))
+
+    # --- Fan speed panel ---
+    ax_fan.plot(nn_pre_t,  nn_res["preheat_fan_speeds"],   color=NN_COLOR,  linewidth=1.2, alpha=0.35)
+    ax_fan.plot(pid_pre_t, pid_res["preheat_fan_speeds"],  color=PID_COLOR, linewidth=1.2, alpha=0.35)
+    ax_fan.plot(nn_res["times"],  nn_res["fan_speeds"],  color=NN_COLOR,  linewidth=1.5, label="NN (SAC)")
+    ax_fan.plot(pid_res["times"], pid_res["fan_speeds"], color=PID_COLOR, linewidth=1.5, label="PID")
+    ax_fan.set_ylabel("Fan Speed", color="#cccccc", fontsize=10)
+    ax_fan.set_ylim(-0.05, 1.05)
+
+    # --- Auger feed rate panel ---
+    ax_auger.plot(nn_pre_t,  nn_res["preheat_auger_rates"],   color=NN_COLOR,  linewidth=1.2, alpha=0.35)
+    ax_auger.plot(pid_pre_t, pid_res["preheat_auger_rates"],  color=PID_COLOR, linewidth=1.2, alpha=0.35)
+    ax_auger.plot(nn_res["times"],  nn_res["auger_rates"],  color=NN_COLOR,  linewidth=1.5, label="NN (SAC)")
+    ax_auger.plot(pid_res["times"], pid_res["auger_rates"], color=PID_COLOR, linewidth=1.5, label="PID")
+    ax_auger.set_ylabel("Auger Feed Rate", color="#cccccc", fontsize=10)
+    ax_auger.set_ylim(-0.05, 1.05)
+    ax_auger.set_xlabel("Time (minutes)", color="#cccccc", fontsize=11)
+
+    # Lid events on all panels
+    if scenario["lid_events"]:
+        for open_t, close_t in scenario["lid_events"]:
+            for ax in (ax_temp, ax_fan, ax_auger):
+                ax.axvline(open_t / 60,  color=LID_COLOR, linestyle=":", linewidth=1.0, alpha=0.7)
+                ax.axvline(close_t / 60, color=LID_COLOR, linestyle=":", linewidth=1.0, alpha=0.7)
+        lid_patch = mpatches.Patch(color=LID_COLOR, label="Lid open/close")
+        for ax in (ax_temp, ax_fan, ax_auger):
+            handles, _ = ax.get_legend_handles_labels()
+            ax.legend(handles=[*handles, lid_patch], loc="upper right", fontsize=9,
+                      facecolor=BG_OUTER, edgecolor="#444466", labelcolor="white")
+    else:
+        for ax in (ax_temp, ax_fan, ax_auger):
+            ax.legend(loc="upper right", fontsize=9,
+                      facecolor=BG_OUTER, edgecolor="#444466", labelcolor="white")
+
+    for ax in (ax_temp, ax_fan, ax_auger):
+        ax.tick_params(colors="#aaaaaa")
+        ax.spines[:].set_color("#333355")
+        ax.grid(True, alpha=0.2, color="#445566")
+
+    fig.suptitle("PID vs Neural Network — Fan Speed & Auger Control",
+                 fontsize=13, color="#e0e0e0", y=0.99)
+    ax_temp.set_title(scenario["label"], fontsize=12, color="#c0c0ff", pad=8)
+
+    plt.tight_layout()
+
+    slug = _slugify(scenario["label"])
+    filename = f"{timestamp}_{slug}_controls.png"
+    filepath = os.path.join(GRAPHS_DIR, filename)
+    plt.savefig(filepath, dpi=150, facecolor=fig.get_facecolor())
+    print(f"Saved: {filepath}")
+    plt.close(fig)
+
+
+RIBS_SCENARIO_INDEX = 2     # "Ribs — 3 hours, 275°F, cold day"
+
+
 def main():
     print(f"Loading model from {MODEL_PATH}...")
     model = SAC.load(MODEL_PATH)
@@ -259,7 +371,14 @@ def main():
         pid_results.append(run_pid(scenario))
         nn_results.append(run_nn(scenario, model))
 
-    plot(SCENARIOS, pid_results, nn_results)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    plot(SCENARIOS, pid_results, nn_results, timestamp)
+    plot_controls(
+        SCENARIOS[RIBS_SCENARIO_INDEX],
+        pid_results[RIBS_SCENARIO_INDEX],
+        nn_results[RIBS_SCENARIO_INDEX],
+        timestamp,
+    )
 
     print("\n--- Summary ---")
     for scenario, pid_res, nn_res in zip(SCENARIOS, pid_results, nn_results):

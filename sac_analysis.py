@@ -60,22 +60,22 @@ PREHEAT_MAX_STEPS = 7200
 
 
 def _preheat_nn(env, model, target):
-    temps, feed_rates, fan_speeds = [], [], []
+    temps, fan_speeds, auger_rates = [], [], []
     obs = env._get_obs()
     for _ in range(PREHEAT_MAX_STEPS):
         action, _ = model.predict(obs, deterministic=True)
         prev_temp = env.simulator.grill_temperature
-        env.simulator.step(float(action[0]))
+        env.simulator.step(float(action[0]), float(action[1]))
         delta_temp = env.simulator.grill_temperature - prev_temp
         env._temperature_acceleration = delta_temp - env._delta_temperature
         env._delta_temperature = delta_temp
         obs = env._get_obs()
         temps.append(env.simulator.grill_temperature)
-        feed_rates.append(env.simulator.auger_feed_rate)
-        fan_speeds.append(env.simulator.fire_strength)
+        fan_speeds.append(env.simulator.fan_speed)
+        auger_rates.append(env.simulator.auger_feed_rate)
         if env.simulator.grill_temperature >= target - PREHEAT_THRESHOLD:
             break
-    return temps, feed_rates, fan_speeds
+    return temps, fan_speeds, auger_rates
 
 
 def run_nn(scenario, model) -> dict:
@@ -86,10 +86,10 @@ def run_nn(scenario, model) -> dict:
     env._delta_temperature = 0.0
     env._temperature_acceleration = 0.0
 
-    preheat_temps, preheat_feed_rates, preheat_fan_speeds = _preheat_nn(env, model, scenario["target"])
+    preheat_temps, preheat_fan_speeds, preheat_auger_rates = _preheat_nn(env, model, scenario["target"])
 
     obs = env._get_obs()
-    times, temps, feed_rates, fan_speeds = [], [], [], []
+    times, temps, fan_speeds, auger_rates = [], [], [], []
     opens  = {o for o, _ in scenario["lid_events"]}
     closes = {c for _, c in scenario["lid_events"]}
 
@@ -101,7 +101,7 @@ def run_nn(scenario, model) -> dict:
 
         action, _ = model.predict(obs, deterministic=True)
         prev_temp = env.simulator.grill_temperature
-        env.simulator.step(float(action[0]))
+        env.simulator.step(float(action[0]), float(action[1]))
         delta_temp = env.simulator.grill_temperature - prev_temp
         env._temperature_acceleration = delta_temp - env._delta_temperature
         env._delta_temperature = delta_temp
@@ -109,18 +109,18 @@ def run_nn(scenario, model) -> dict:
 
         times.append(step / 60)
         temps.append(env.simulator.grill_temperature)
-        feed_rates.append(env.simulator.auger_feed_rate)
-        fan_speeds.append(env.simulator.fire_strength)
+        fan_speeds.append(env.simulator.fan_speed)
+        auger_rates.append(env.simulator.auger_feed_rate)
 
     preheat_minutes = len(preheat_temps) / 60
     return {
         "times": times,
         "temps": temps,
-        "feed_rates": feed_rates,
         "fan_speeds": fan_speeds,
+        "auger_rates": auger_rates,
         "preheat_temps": preheat_temps,
-        "preheat_feed_rates": preheat_feed_rates,
         "preheat_fan_speeds": preheat_fan_speeds,
+        "preheat_auger_rates": preheat_auger_rates,
         "preheat_minutes": preheat_minutes,
     }
 
@@ -202,28 +202,28 @@ def plot(scenarios, nn_results):
         ax_temp.spines[:].set_color("#333355")
         ax_temp.grid(True, alpha=0.2, color="#445566")
 
-        # --- Feed rate panel ---
-        ax_feed.plot(preheat_times, nn_res["preheat_feed_rates"],
+        # --- Fan speed panel ---
+        ax_feed.plot(preheat_times, nn_res["preheat_fan_speeds"],
                      color=FEED_COLOR, linewidth=1.2, alpha=0.35)
         ax_feed.axvspan(-preheat_min, 0, color=PREHEAT_COLOR, alpha=0.8)
         ax_feed.axvline(0, color="#aaaaaa", linewidth=0.8, linestyle="--")
-        ax_feed.plot(nn_res["times"], nn_res["feed_rates"],
-                     color=FEED_COLOR, linewidth=1.5, label="Feed Rate")
-        ax_feed.set_ylabel("Feed Rate", color="#cccccc", fontsize=10)
+        ax_feed.plot(nn_res["times"], nn_res["fan_speeds"],
+                     color=FEED_COLOR, linewidth=1.5, label="Fan Speed")
+        ax_feed.set_ylabel("Fan Speed", color="#cccccc", fontsize=10)
         ax_feed.set_ylim(-0.05, 1.05)
         ax_feed.legend(loc="upper right", fontsize=9, facecolor=BG_OUTER, edgecolor="#444466", labelcolor="white")
         ax_feed.tick_params(colors="#aaaaaa")
         ax_feed.spines[:].set_color("#333355")
         ax_feed.grid(True, alpha=0.2, color="#445566")
 
-        # --- Fan speed panel ---
-        ax_fan.plot(preheat_times, nn_res["preheat_fan_speeds"],
+        # --- Auger feed rate panel ---
+        ax_fan.plot(preheat_times, nn_res["preheat_auger_rates"],
                     color=FAN_COLOR, linewidth=1.2, alpha=0.35)
         ax_fan.axvspan(-preheat_min, 0, color=PREHEAT_COLOR, alpha=0.8)
         ax_fan.axvline(0, color="#aaaaaa", linewidth=0.8, linestyle="--")
-        ax_fan.plot(nn_res["times"], nn_res["fan_speeds"],
-                    color=FAN_COLOR, linewidth=1.5, label="Fan Speed (fire strength)")
-        ax_fan.set_ylabel("Fan Speed", color="#cccccc", fontsize=10)
+        ax_fan.plot(nn_res["times"], nn_res["auger_rates"],
+                    color=FAN_COLOR, linewidth=1.5, label="Auger Feed Rate")
+        ax_fan.set_ylabel("Auger Feed Rate", color="#cccccc", fontsize=10)
         ax_fan.set_ylim(-0.05, 1.05)
         ax_fan.set_xlabel("Time (minutes)", color="#cccccc", fontsize=11)
         ax_fan.legend(loc="upper right", fontsize=9, facecolor=BG_OUTER, edgecolor="#444466", labelcolor="white")
