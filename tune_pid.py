@@ -11,10 +11,14 @@ LID_OPEN_AT = 1800
 LID_CLOSE_AT = 1920
 
 GAIN_SETS = [
-    {"label": "kp=0.005, ki=0.0002, kd=0.5", "kp": 0.005, "ki": 0.0002, "kd": 0.5},
-    {"label": "kp=0.005, ki=0.0002, kd=0.7", "kp": 0.005, "ki": 0.0002, "kd": 0.7},
-    {"label": "kp=0.005, ki=0.0003, kd=0.5", "kp": 0.005, "ki": 0.0003, "kd": 0.5},
-    {"label": "kp=0.004, ki=0.0002, kd=0.5", "kp": 0.004, "ki": 0.0002, "kd": 0.5},
+    {"label": "kp=0.005, ki=0.0002, kd=0.5  (original)", "kp": 0.005, "ki": 0.0002, "kd": 0.5},
+    {"label": "kp=0.005, ki=0.001,  kd=0.5",              "kp": 0.005, "ki": 0.001,  "kd": 0.5},
+    {"label": "kp=0.005, ki=0.001,  kd=0.3",              "kp": 0.005, "ki": 0.001,  "kd": 0.3},
+    {"label": "kp=0.008, ki=0.001,  kd=0.3",              "kp": 0.008, "ki": 0.001,  "kd": 0.3},
+    {"label": "kp=0.01,  ki=0.0005, kd=0.5",              "kp": 0.01,  "ki": 0.0005, "kd": 0.5},
+    {"label": "kp=0.01,  ki=0.001,  kd=0.3",              "kp": 0.01,  "ki": 0.001,  "kd": 0.3},
+    {"label": "kp=0.015, ki=0.002,  kd=0.2",              "kp": 0.015, "ki": 0.002,  "kd": 0.2},
+    {"label": "kp=0.007, ki=0.0005, kd=0.4",              "kp": 0.007, "ki": 0.0005, "kd": 0.4},
 ]
 
 
@@ -71,6 +75,15 @@ def main():
     plt.tight_layout()
     plt.savefig("pid_tuning.png", dpi=150)
     print("Saved to pid_tuning.png")
+    print()
+    print("--- MAE Results ---")
+    results = []
+    for gains in GAIN_SETS:
+        _, temps, _ = run_gains(gains["kp"], gains["ki"], gains["kd"])
+        mae_val = sum(abs(t - TARGET_TEMP) for t in temps) / len(temps)
+        results.append((mae_val, gains["label"]))
+    for mae_val, label in sorted(results):
+        print(f"  {mae_val:5.1f}°F  {label}")
 
 
 if __name__ == "__main__":

@@ -12,9 +12,9 @@ class PIDController:
 
     def __init__(
         self,
-        kp: float = 0.005,
-        ki: float = 0.0002,
-        kd: float = 0.5,
+        kp: float = 0.015,
+        ki: float = 0.002,
+        kd: float = 0.2,
         timestep: float = 1.0,
     ):
         self.kp = kp

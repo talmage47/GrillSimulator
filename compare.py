@@ -178,6 +178,15 @@ def mae(temps, target):
     return sum(abs(t - target) for t in temps) / len(temps)
 
 
+def _duty_cycle(auger_rates, window=120):
+    """Rolling auger duty cycle — fraction of time on over the last `window` seconds."""
+    out = []
+    for i in range(len(auger_rates)):
+        chunk = auger_rates[max(0, i - window + 1): i + 1]
+        out.append(sum(chunk) / len(chunk))
+    return out
+
+
 def _slugify(text):
     """Convert a scenario label into a safe filename fragment."""
     text = text.lower()
@@ -231,7 +240,7 @@ def plot(scenarios, pid_results, nn_results, timestamp):
 
         pid_mae = mae(pid_res["temps"], target)
         nn_mae  = mae(nn_res["temps"],  target)
-        ax.text(0.99, 0.93, f"MAE — PID: {pid_mae:.1f}°F   NN: {nn_mae:.1f}°F",
+        ax.text(0.99, 0.93, f"MAE — PID: {pid_mae:.2f}°F   NN: {nn_mae:.2f}°F",
                 transform=ax.transAxes, ha="right", fontsize=11,
                 color="#dddddd", bbox=dict(boxstyle="round,pad=0.4", fc="#1a1a2e", ec="#444466", alpha=0.9))
 
@@ -302,7 +311,7 @@ def plot_controls(scenario, pid_res, nn_res, timestamp):
 
     pid_mae = mae(pid_res["temps"], target)
     nn_mae  = mae(nn_res["temps"],  target)
-    ax_temp.text(0.99, 0.93, f"MAE — PID: {pid_mae:.1f}°F   NN: {nn_mae:.1f}°F",
+    ax_temp.text(0.99, 0.93, f"MAE — PID: {pid_mae:.2f}°F   NN: {nn_mae:.2f}°F",
                  transform=ax_temp.transAxes, ha="right", fontsize=11, color="#dddddd",
                  bbox=dict(boxstyle="round,pad=0.4", fc=BG_OUTER, ec="#444466", alpha=0.9))
 
@@ -314,12 +323,12 @@ def plot_controls(scenario, pid_res, nn_res, timestamp):
     ax_fan.set_ylabel("Fan Speed", color="#cccccc", fontsize=10)
     ax_fan.set_ylim(-0.05, 1.05)
 
-    # --- Auger feed rate panel ---
-    ax_auger.plot(nn_pre_t,  nn_res["preheat_auger_rates"],   color=NN_COLOR,  linewidth=1.2, alpha=0.35)
-    ax_auger.plot(pid_pre_t, pid_res["preheat_auger_rates"],  color=PID_COLOR, linewidth=1.2, alpha=0.35)
-    ax_auger.plot(nn_res["times"],  nn_res["auger_rates"],  color=NN_COLOR,  linewidth=1.5, label="NN (SAC)")
-    ax_auger.plot(pid_res["times"], pid_res["auger_rates"], color=PID_COLOR, linewidth=1.5, label="PID")
-    ax_auger.set_ylabel("Auger Feed Rate", color="#cccccc", fontsize=10)
+    # --- Auger duty cycle panel (2-min rolling window) ---
+    ax_auger.plot(nn_pre_t,  _duty_cycle(nn_res["preheat_auger_rates"]),  color=NN_COLOR,  linewidth=1.2, alpha=0.35)
+    ax_auger.plot(pid_pre_t, _duty_cycle(pid_res["preheat_auger_rates"]), color=PID_COLOR, linewidth=1.2, alpha=0.35)
+    ax_auger.plot(nn_res["times"],  _duty_cycle(nn_res["auger_rates"]),  color=NN_COLOR,  linewidth=1.5, label="NN (SAC)")
+    ax_auger.plot(pid_res["times"], _duty_cycle(pid_res["auger_rates"]), color=PID_COLOR, linewidth=1.5, label="PID")
+    ax_auger.set_ylabel("Auger Duty Cycle\n(2-min window)", color="#cccccc", fontsize=10)
     ax_auger.set_ylim(-0.05, 1.05)
     ax_auger.set_xlabel("Time (minutes)", color="#cccccc", fontsize=11)
 
@@ -384,8 +393,13 @@ def main():
     for scenario, pid_res, nn_res in zip(SCENARIOS, pid_results, nn_results):
         pid_mae = mae(pid_res["temps"], scenario["target"])
         nn_mae  = mae(nn_res["temps"],  scenario["target"])
-        winner = "NN" if nn_mae < pid_mae else "PID"
-        print(f"{scenario['label']}: PID={pid_mae:.1f}°F  NN={nn_mae:.1f}°F  → {winner} wins")
+        if abs(pid_mae - nn_mae) < 0.5:
+            winner = "≈ TIE"
+        elif nn_mae < pid_mae:
+            winner = "NN"
+        else:
+            winner = "PID"
+        print(f"{scenario['label']}: PID={pid_mae:.2f}°F  NN={nn_mae:.2f}°F  → {winner}")
 
 
 if __name__ == "__main__":

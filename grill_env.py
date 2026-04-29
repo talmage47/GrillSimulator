@@ -29,8 +29,8 @@ class GrillEnv(gym.Env):
     AMBIENT_TEMP_MIN = 20.0
     AMBIENT_TEMP_MAX = 100.0
 
-    # Episode length in timesteps (30 simulated minutes at 1s/step)
-    EPISODE_STEPS = 1800
+    # Episode length in timesteps (60 simulated minutes at 1s/step)
+    EPISODE_STEPS = 3600
 
     # Lid event parameters
     LID_OPEN_PROB = 0.0005      # probability per step of lid opening

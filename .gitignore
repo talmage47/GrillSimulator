@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated output
+graphs/
+logs/
+
+# Claude Code
+.claude/

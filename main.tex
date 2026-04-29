@@ -1,0 +1,231 @@
+\documentclass{article}
+\usepackage[style=apa]{biblatex}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{amsmath}
+\addbibresource{references.bib}
+
+\title{CS6480 Final Report}
+\author{Talmage Gaisford}
+\date{April 2026}
+
+\begin{document}
+
+\maketitle
+
+\section{Goals}
+
+Pellet grills present a difficult control problem due to delayed 
+response times, variable combustion, and disturbances such as lid openings.
+This project evaluates whether a neural network–based controller can
+improve temperature regulation compared to a classical PID controller.
+
+A physics-based simulation of a pellet grill was developed to test both
+approaches. A Soft Actor-Critic (SAC) agent was trained to control fan
+speed and pellet feed, and its performance was compared to a tuned PID
+controller across several cooking scenarios using offset from the target
+temperature as the primary metric.
+
+
+\section{Background}
+
+Pellet grills, such as the Traeger Ironwood 650, regulate temperature by
+controlling airflow and fuel delivery, typically using PID-based control.
+Although PID controllers are simple, effective, and well tested, they can struggle with 
+disturbances present in the system and can cause temperature oscillation.
+
+Disturbances like lid openings cause rapid heat loss, and PID
+controllers often react too slowly or overshoot during recovery. Manufacturers are opposed
+to adding additional sensors for the sake of keeping points of failure down; improving control
+performance through software alone is desirable.
+
+Reinforcement learning provides an alternative approach by learning control
+policies directly from system behavior. This project applies a Soft
+Actor-Critic (SAC) agent to determine whether a learned controller can
+better handle these challenges than a traditional PID controller.
+
+
+\section{Methods}
+
+\subsection{Simulation Model}
+
+A physics-based pellet grill simulator was developed to evaluate two
+temperature control strategies.
+
+Fan speed (0--1) controls airflow into the firepot and follows a
+first-order response with a 5-second time constant. The auger is binary
+(on/off) and delivers fuel with a 3-second response delay.
+
+Combustion rate is limited by the minimum of airflow and fuel supply,
+reflecting the requirement for both inputs. Heat output is proportional
+to combustion, with a maximum of 45 heat units.
+
+Heat loss follows Newton's law of cooling (coefficient 0.1 per
+\textdegree F above ambient). Lid openings increase heat loss by $4\times$,
+and fan speed adds a small convective loss term (0.01).
+
+Grill temperature evolves from net heat input divided by a thermal mass
+of 50~\textdegree F{\textperiodcentered}s per unit. The simulator runs at
+1-second timesteps, with varying ambient conditions and lid events.
+
+\subsection{PID Controller}
+
+A PID controller with anti-windup was implemented and tuned via parameter
+sweep on a 60-minute, 225\textdegree F reference cook. Final gains were
+$k_p = 0.015$, $k_i = 0.002$, and $k_d = 0.2$.
+
+The controller outputs a single signal in $[0,1]$ that directly sets fan
+speed. The auger switches on when this signal exceeds 0.5, coupling airflow
+and fuel control.
+
+\subsection{Neural Network Controller (SAC)}
+
+A Soft Actor-Critic (SAC) agent (using \texttt{stable\_baselines3}) was
+trained to control the system. The agent observes:
+
+\begin{equation*}
+    \bigl[T_{\text{grill}},\;\dot{T},\;\ddot{T},\;
+    v_{\text{fan}},\;u_{\text{auger}},\;
+    T_{\text{target}},\;e,\;\tau\bigr]
+\end{equation*}
+
+where $e = T_{\text{target}} - T_{\text{grill}}$ and $\tau$ is normalized
+episode time. Ambient temperature and lid state are not observed.
+
+The action space is continuous: $[a_{\text{fan}}, a_{\text{auger}}] \in [0,1]^2$.
+Fan maps directly to speed, while auger output is thresholded at 0.5 to
+produce binary behavior.
+
+The reward is:
+\begin{equation*}
+    r_t = -\left| T_{\text{grill}} - T_{\text{target}} \right|
+\end{equation*}
+
+Training used 1,000,000 timesteps, learning rate $10^{-4}$, 3,600-step
+episodes, and 4 parallel environments. The best model was selected based
+on evaluation performance every 10,000 steps.
+
+\subsection{Evaluation Scenarios}
+
+Four scenarios were evaluated:
+
+\begin{enumerate}
+    \item \textbf{Steaks} --- 30~min, 450\textdegree F, 65\textdegree F ambient, one lid event
+    \item \textbf{Chicken} --- 90~min, 375\textdegree F, 75\textdegree F ambient, lid every 30~min
+    \item \textbf{Ribs} --- 3~hours, 275\textdegree F, 40\textdegree F ambient, spritz at 1h and 2h
+    \item \textbf{Brisket} --- 6~hours, 225\textdegree F, 25\textdegree F ambient, lid every 30~min
+\end{enumerate}
+
+Each run includes a preheat phase (excluded from evaluation) followed by
+the cook phase. Performance is measured using mean absolute error (MAE).
+
+\section{Results}
+
+Representative temperature traces for each scenario are shown in
+Figure~\ref{fig:all_scenarios}.
+
+\begin{figure}[H]
+    \centering
+
+    \begin{subfigure}{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{brisket.png}
+        \caption{Brisket (6h, 225\textdegree F)}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{chicken.png}
+        \caption{Chicken (90 min, 375\textdegree F)}
+    \end{subfigure}
+
+    \vspace{0.5em}
+
+    \begin{subfigure}{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{ribs.png}
+        \caption{Ribs (3h, 275\textdegree F)}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{steaks.png}
+        \caption{Steaks (30 min, 450\textdegree F)}
+    \end{subfigure}
+
+    \caption{Temperature control comparison between PID and neural network controllers across all scenarios.}
+    \label{fig:all_scenarios}
+\end{figure}
+
+
+
+Table~\ref{tab:mae} reports the mean absolute temperature error for each
+controller across all four scenarios.
+
+\begin{table}[h]
+    \centering
+    \begin{tabular}{lllrrl}
+        \hline
+        \textbf{Scenario} & \textbf{Duration} & \textbf{Target} &
+        \textbf{PID MAE (\textdegree F)} & \textbf{NN MAE (\textdegree F)} &
+        \textbf{Outcome} \\
+        \hline
+        Steaks  & 30~min   & 450\textdegree F & 8.50 & 10.10 & PID wins \\
+        Chicken & 90~min   & 375\textdegree F & 2.10 &  1.90 & NN wins  \\
+        Ribs    & 3~hours  & 275\textdegree F & 1.09 &  1.13 & $\approx$ Tie \\
+        Brisket & 6~hours  & 225\textdegree F & 0.50 &  0.30 & NN wins  \\
+        \hline
+    \end{tabular}
+    \caption{Mean absolute temperature error (MAE) by scenario. Lower is better.}
+    \label{tab:mae}
+\end{table}
+
+The NN controller has the advantage on longer cooks. The
+performance gap widens with cook duration: the NN edges out the PID on
+chicken, matches it on ribs, and nearly halves PID error on the 6-hour
+brisket cook.
+
+Figure~\ref{fig:all_scenarios} shows temperature performance, but it does
+not reveal how each controller achieves that behavior. To better understand
+how control is achieved, Figure~\ref{fig:ribs_controls} shows the internal
+control signals for the ribs scenario.
+
+The PID controller produces a single coupled control signal, resulting in
+synchronized adjustments to fan speed and auger activity. In contrast, the
+neural network independently modulates airflow and fuel delivery, allowing
+it to apply short bursts of fuel while maintaining smoother fan control.
+This separation enables more precise handling of disturbances such as lid
+openings.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{ribs_controls.png}
+    \caption{Controller behavior during the ribs scenario (3~hours, 275\textdegree F).
+    Top: grill temperature response. Middle: fan speed. Bottom: auger duty cycle.
+    The neural network (SAC) independently adjusts fan and auger signals,
+    while the PID controller produces coupled responses.}
+    \label{fig:ribs_controls}
+\end{figure}
+
+\section{Conclusions}
+
+The neural network controller outperforms the PID on longcooks. 
+Its advantage comes partially from its ability to independently control fan
+speed and auger feed, something the coupled PID cannot do. The NN
+learned to manage the lag between airflow and fuel delivery and to anticipate
+disturbances (ambient temperature, lid events) from temperature derivatives
+alone.
+
+The PID remains competitive for medium-length cooks and is simpler to
+implement. With properly tuned parameters it achieved good
+accuracy on the ribs and chicken scenarios.
+
+On short, high-temperature cooks (steaks, 30~minutes, 450\textdegree F),
+the PID's reactive control beats out the NN. The NN was designed and trained to manage sustained,
+steady low-and-slow cooks where anticipating and smoothing slow thermal drift
+matters. At high temperatures near the grill's maximum, the
+control problem reduces to a simpler task that a well-tuned reactive
+controller handles efficiently.
+
+\end{document}
